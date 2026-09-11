@@ -1,61 +1,70 @@
--- ESP Script for MM2
+-- Надежный ESP для MM2 (через Highlight и BillboardGui)
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
 
--- Настройки цветов
 local Colors = {
     Murderer = Color3.fromRGB(255, 0, 0),     -- Красный
     Sheriff = Color3.fromRGB(0, 150, 255),    -- Синий
     Innocent = Color3.fromRGB(0, 255, 0),     -- Зеленый
-    GunDrop = Color3.fromRGB(255, 255, 0)     -- Желтый (выпавший пистолет)
+    GunDrop = Color3.fromRGB(255, 255, 0)     -- Желтый
 }
 
-local function createESP(character, color, textString)
-    local rootPart = character:WaitForChild("HumanoidRootPart", 5)
-    local humanoid = character:WaitForChild("Humanoid", 5)
-    if not rootPart or not humanoid then return end
+local function applyESP(character, color, roleName)
+    if not character:FindFirstChild("HumanoidRootPart") then return end
+    
+    -- 1. Подсветка силуэта сквозь стены (Highlight)
+    if not character:FindFirstChild("MM2_Highlight") then
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "MM2_Highlight"
+        highlight.Adornee = character
+        highlight.FillColor = color
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.Parent = character
+    end
 
-    -- Создаем текст над головой
-    local text = Drawing.new("Text")
-    text.Visible = false
-    text.Center = true
-    text.Outline = true
-    text.Font = 2
-    text.Size = 16
-    text.Color = color
+    -- 2. Текст над головой (BillboardGui)
+    if not character:FindFirstChild("MM2_Tag") then
+        local head = character:WaitForChild("Head", 5)
+        if head then
+            local billboard = Instance.new("BillboardGui")
+            billboard.Name = "MM2_Tag"
+            billboard.Adornee = head
+            billboard.Size = UDim2.new(0, 100, 0, 50)
+            billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+            billboard.AlwaysOnTop = true
 
-    local connection
-    connection = game:GetService("RunService").RenderStepped:Connect(function()
-        if not character or not character.Parent or humanoid.Health <= 0 then
-            text:Remove()
-            connection:Disconnect()
-            return
+            local textLabel = Instance.new("TextLabel")
+            textLabel.Size = UDim2.new(1, 0, 1, 0)
+            textLabel.BackgroundTransparency = 1
+            textLabel.Text = roleName
+            textLabel.TextColor3 = color
+            textLabel.TextScaled = true
+            textLabel.Font = Enum.Font.SourceSansBold
+            textLabel.TextStrokeTransparency = 0
+            textLabel.Parent = billboard
+
+            billboard.Parent = character
         end
-
-        local vector, onScreen = Camera:WorldToViewportPoint(rootPart.Position + Vector3.new(0, 2.5, 0))
-        if onScreen then
-            text.Position = Vector2.new(vector.X, vector.Y)
-            text.Text = textString
-            text.Visible = true
-        else
-            text.Visible = false
-        end
-    end)
+    end
 end
 
--- Функция проверки ролей в MM2
-local function setupPlayer(player)
+local function checkPlayer(player)
     if player == LocalPlayer then return end
 
-    player.CharacterAdded:Connect(function(character)
-        task.wait(1)
+    local function update()
+        local character = player.Character
+        if not character then return end
+
+        task.wait(0.5) -- Ждем прогрузку персонажа
+
         local role = "Innocent"
         local color = Colors.Innocent
 
-        -- Проверка инвентаря на наличие ножа или пистолета
-        local function checkBackpack(item)
+        -- Проверяем инвентарь и руки
+        local function scan(item)
             if item:IsA("Tool") then
                 if item.Name == "Knife" then
                     role = "Murderer"
@@ -67,73 +76,28 @@ local function setupPlayer(player)
             end
         end
 
-        for _, item in ipairs(player.Backpack:GetChildren()) do checkBackpack(item) end
-        player.Backpack.ChildAdded:Connect(checkBackpack)
-
-        if character:FindFirstChild("Knife") then
-            role = "Murderer"
-            color = Colors.Murderer
-        elseif character:FindFirstChild("Gun") then
-            role = "Sheriff"
-            color = Colors.Sheriff
+        if player.Backpack then
+            for _, item in ipairs(player.Backpack:GetChildren()) do scan(item) end
         end
+        for _, item in ipairs(character:GetChildren()) do scan(item) end
 
-        createESP(character, color, player.Name .. " [" .. role .. "]")
+        applyESP(character, color, player.Name .. "\n[" .. role .. "]")
+    end
+
+    player.CharacterAdded:Connect(function()
+        task.wait(1)
+        update()
     end)
 
     if player.Character then
-        task.spawn(function()
-            local character = player.Character
-            local role = "Innocent"
-            local color = Colors.Innocent
-            
-            if character:FindFirstChild("Knife") or player.Backpack:FindFirstChild("Knife") then
-                role = "Murderer"
-                color = Colors.Murderer
-            elseif character:FindFirstChild("Gun") or player.Backpack:FindFirstChild("Gun") then
-                role = "Sheriff"
-                color = Colors.Sheriff
-            end
-
-            createESP(character, color, player.Name .. " [" .. role .. "]")
-        end)
+        task.spawn(update)
     end
 end
 
 for _, p in ipairs(Players:GetPlayers()) do
-    setupPlayer(p)
+    checkPlayer(p)
 end
 
-Players.PlayerAdded:Connect(setupPlayer)
+Players.PlayerAdded:Connect(checkPlayer)
 
--- Подсветка выпавшего пистолета на карте
-Workspace.ChildAdded:Connect(function(child)
-    if child.Name == "GunDrop" then
-        local text = Drawing.new("Text")
-        text.Visible = true
-        text.Center = true
-        text.Outline = true
-        text.Font = 2
-        text.Size = 14
-        text.Color = Colors.GunDrop
-        text.Text = "GUN"
-
-        local conn
-        conn = game:GetService("RunService").RenderStepped:Connect(function()
-            if not child.Parent then
-                text:Remove()
-                conn:Disconnect()
-                return
-            end
-            local vector, onScreen = Camera:WorldToViewportPoint(child.Position)
-            if onScreen then
-                text.Position = Vector2.new(vector.X, vector.Y)
-                text.Visible = true
-            else
-                text.Visible = false
-            end
-        end)
-    end
-end)
-
-print("MM2 ESP Loaded!")
+print("MM2 ESP (v2) Loaded!")
